@@ -20,7 +20,7 @@ on:
     branches: [ios-port]
 
 permissions:
-  contents: read
+  contents: write # to publish the .ipa to the "ios-latest" release
 
 jobs:
   build-ios:
@@ -116,3 +116,22 @@ jobs:
           name: ios-build-log
           path: tauri-ios-build.log
           if-no-files-found: ignore
+
+      # Publish to a fixed public release so the result can be downloaded
+      # without GitHub login (artifacts require auth, release assets of a
+      # public repo do not). This is also how Cronx fetches the .ipa/log.
+      - name: Publish .ipa and log to the ios-latest release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ios-latest >/dev/null 2>&1 || \
+            gh release create ios-latest --prerelease \
+              --title "iOS build (latest)" \
+              --notes "Unsigned webOS Dev Manager .ipa for sideloading. Rebuilt on every run."
+          FILES=""
+          [ -f webOS-Dev-Manager_Unsigned.ipa ] && FILES="webOS-Dev-Manager_Unsigned.ipa"
+          [ -f tauri-ios-build.log ] && FILES="$FILES tauri-ios-build.log"
+          if [ -n "$FILES" ]; then
+            gh release upload ios-latest $FILES --clobber
+          fi

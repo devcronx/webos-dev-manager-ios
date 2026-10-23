@@ -11,6 +11,11 @@
 #   3. Download the "webos-dev-manager-ios" artifact when it finishes.
 #      First runs may fail inside libssh/OpenSSL (C libraries) - the full
 #      log is uploaded as an artifact too, which is what we debug from.
+#
+# NOTE (2026-10-23): the */30 schedule had produced zero runs ~3.5h after this
+# file landed on the default branch, so this commit re-registers the workflow
+# with GitHub's scheduler. Deploy-key pushes don't fire push events, but they
+# do update the ref the scheduler reads.
 
 name: iOS unsigned IPA
 

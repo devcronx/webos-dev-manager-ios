@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iOS gates LAN connections behind this permission, same as macOS 15.
+	     Without it the app never appears under Privacy & Security > Local
+	     Network and every connection to the TV fails with EHOSTUNREACH
+	     ("No route to host"). Tauri merges this file into the iOS app's
+	     Info.plist because of its Info.ios.plist name. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>webOS Dev Manager connects to your TV on the local network to set up developer mode and manage apps.</string>
+</dict>
+</plist>

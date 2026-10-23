@@ -1,0 +1,118 @@
+# Builds webOS Dev Manager for iOS on a GitHub-hosted Mac (no local Mac needed)
+# and packages the result as an UNSIGNED .ipa.
+#
+# The unsigned .ipa is signed later, on the user's own iPhone, with their
+# Apple ID (SideStore / AltStore / Sideloadly). That is the free sideload
+# route: the app is re-signed every 7 days by the sideload tool.
+#
+# How to use:
+#   1. Push this repo to GitHub (public repo = free macOS minutes).
+#   2. Actions tab > "iOS unsigned IPA" > Run workflow.
+#   3. Download the "webos-dev-manager-ios" artifact when it finishes.
+#      First runs may fail inside libssh/OpenSSL (C libraries) - the full
+#      log is uploaded as an artifact too, which is what we debug from.
+
+name: iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-port]
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: "Setup Node (repo engines: 22 / 24 / 26)"
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Rust with iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # NOTE: `npm ci` fails on upstream main - package-lock.json is out of
+      # sync with package.json (missing chokidar/readdirp). Use install.
+      - name: Install JS dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Generate the iOS project (src-tauri/gen/apple)
+        run: npm run tauri ios init
+
+      - name: Show generated project
+        run: |
+          ls -la src-tauri/gen/apple
+          find src-tauri/gen/apple -maxdepth 2 -name "*.xcodeproj" -o -maxdepth 2 -name "project.yml" | head
+
+      # xcodebuild shim: Tauri calls xcodebuild to archive/export. Without an
+      # Apple Developer team that fails on signing, so inject build settings
+      # that disable code signing. The .app is then packaged manually below.
+      - name: Install xcodebuild signing shim
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/shim"
+          cat > "$GITHUB_WORKSPACE/shim/xcodebuild" <<'EOF'
+          #!/bin/sh
+          exec /usr/bin/xcodebuild "$@" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+          EOF
+          chmod +x "$GITHUB_WORKSPACE/shim/xcodebuild"
+          echo "$GITHUB_WORKSPACE/shim" >> "$GITHUB_PATH"
+
+      - name: Build iOS app (unsigned)
+        id: tauri_build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run tauri ios build -- --export-method debugging 2>&1 | tee tauri-ios-build.log
+
+      - name: Package unsigned .ipa from the built .app
+        run: |
+          APP_PATH="$(find src-tauri/gen/apple -type d -name '*.app' \
+            -not -path '*iphonesimulator*' | head -n 1)"
+          echo "APP_PATH=$APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No device .app was produced - see tauri-ios-build.log artifact"
+            exit 1
+          fi
+          rm -rf Payload webOS-Dev-Manager_Unsigned.ipa
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry webOS-Dev-Manager_Unsigned.ipa Payload
+          ls -lh webOS-Dev-Manager_Unsigned.ipa
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: webos-dev-manager-ios
+          path: webOS-Dev-Manager_Unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload build log (for debugging failed runs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: tauri-ios-build.log
+          if-no-files-found: ignore

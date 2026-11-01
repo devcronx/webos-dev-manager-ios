@@ -117,10 +117,13 @@ jobs:
 
       - name: Build iOS app (unsigned)
         id: tauri_build
-        continue-on-error: true
         run: |
           set -o pipefail
-          npm run tauri ios build -- --export-method debugging 2>&1 | tee tauri-ios-build.log
+          # Run 1 failed in openssl-sys for aarch64-apple-ios: no system
+          # OpenSSL for the iOS target and OPENSSL_DIR unset. Use the
+          # project's vendored-openssl feature, as the other workflows do,
+          # so OpenSSL is built from source for the target instead.
+          npm run tauri ios build -- --export-method debugging --features vendored-openssl 2>&1 | tee tauri-ios-build.log
 
       - name: Package unsigned .ipa from the built .app
         run: |

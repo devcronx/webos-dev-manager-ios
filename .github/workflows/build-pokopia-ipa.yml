@@ -83,15 +83,16 @@ jobs:
           echo "Descargando dump desde el secreto (el link NO se imprime en el log)..."
           python3.12 -m pip install -q gdown
           # gdown maneja la pagina de confirmacion de Drive para archivos grandes.
-          # NO usar --fuzzy: la version instalada de gdown no lo acepta (run 3 lo probo).
+          # La version instalada de gdown NO acepta --fuzzy (run 3) ni --id (run 4):
+          # su uso es gdown <url_o_id> -O salida, con el ID/link como argumento posicional.
           # Extraer el ID del archivo de un link de vista (/file/d/ID/view) o uc (id=ID),
-          # y bajar con gdown --id. Un curl directo a un link de vista solo baja HTML.
+          # y bajar con gdown <ID>. Un curl directo a un link de vista solo baja HTML.
           if echo "$DRIVE_DOWNLOAD_URL" | grep -q "drive.google.com"; then
             FILE_ID=$(echo "$DRIVE_DOWNLOAD_URL" | sed -E 's/.*\/d\/([^\/\?]+).*/\1/; s/.*[?&]id=([^&]+).*/\1/')
-            echo "Usando gdown --id para el archivo de Drive (ID no se imprime)..."
-            gdown --id "$FILE_ID" -O dump.zip
+            echo "Usando gdown con el ID del archivo de Drive (ID no se imprime)..."
+            gdown "$FILE_ID" -O dump.zip
           elif echo "$DRIVE_DOWNLOAD_URL" | grep -Eq "^[A-Za-z0-9_-]{20,}$"; then
-            gdown --id "$DRIVE_DOWNLOAD_URL" -O dump.zip
+            gdown "$DRIVE_DOWNLOAD_URL" -O dump.zip
           else
             curl -L --fail -o dump.zip "$DRIVE_DOWNLOAD_URL"
           fi

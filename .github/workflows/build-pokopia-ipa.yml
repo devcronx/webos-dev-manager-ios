@@ -1,22 +1,26 @@
 # Plantilla para GitHub Actions — Pokopia IPA (solo el build, sin archivos del juego)
-# Pon este archivo en TU repo, en .github/workflows/build-pokopia-ipa.yml
-# Yo (Cronx) NO lo corro, NO recibo tu dump y NO firmo nada. Eso lo haces tú / tu hermano.
+# Este archivo esta en el repo PUBLICO de WebOS por decision de Wilfry (2026-11-02),
+# aunque lo ideal es copiarlo a su repo PRIVADO pokopia. NO contiene ningun link,
+# ningun dump, ningun certificado y ningun Team ID.
+# NO pases tu link de Drive a Cronx. El link va COMO SECRETO en TU repo, nunca en este archivo.
 #
 # Requisitos que vienen del README de xFractals/pokopia-native:
 # - Runner macOS con Xcode 27, Python 3.12, .NET 10 y xcodegen
 # - El build de iPhone solo (--ipa), no la app de Mac
-# - Firma para iPhone con equipo PAGADO de Apple Developer (Extended Virtual Addressing).
+# - Firma para iPhone con equipo PAGADO de Apple Developer con entitlements
+#   (Increased Memory Limit + Extended Virtual Addressing).
 #   Sin ese equipo, el IPA con ID gratis instala y se detiene al arrancar.
-# - Borra el artefacto de GitHub en cuanto lo descargues. retention-days: 1 ayuda, no sustituye borrarlo tú.
+# - Borra el artefacto de GitHub en cuanto lo descargues. retention-days: 1 ayuda, no sustituye borrarlo tu.
 #
-# PASOS QUE TÚ HACES (no están automatizados aquí a propósito):
-# 1. En TU repo, sube/provee tu propio dump por tu vía, sin pasármelo a mí.
-#    El workflow espera que el dump ya esté en el runner en la ruta $DUMP_PATH.
-#    NO incluyas el dump en el repo público, y NO lo subas a este chat.
-# 2. Pon tu Team ID como secreto en TU repo (nombre: APPLE_TEAM_ID) si vas a firmar con Xcode.
-#    No escribas el Team ID en este archivo.
-# 3. Lanza el workflow a mano (workflow_dispatch), descarga el IPA, y bórralo de GitHub de una vez.
-# 4. El refresh de shaders después de jugar zonas nuevas va aparte, en tu máquina / teléfono.
+# PASOS QUE TU HACES (Cronx NO los corre, NO recibe tu dump y NO firma nada):
+# 1. Sube tu dump COMPRIMIDO en un solo .zip a TU Drive privado, Restringido solo tu.
+#    El .zip, al descomprimirlo, debe dejar updates/327680/exefs/ y romfs/,
+#    o exefs/ y romfs/ directamente en la carpeta.
+# 2. En TU repo, pon el link de descarga directa de ese .zip como secreto
+#    (nombre: DRIVE_DOWNLOAD_URL). Nunca lo escribas en este archivo ni en el chat.
+# 3. Pon tu Team ID como secreto en TU repo (nombre: APPLE_TEAM_ID) si vas a firmar con Xcode.
+# 4. Lanza el workflow a mano (workflow_dispatch), descarga el IPA, y borralo de GitHub de una vez.
+# 5. El refresh de shaders despues de jugar zonas nuevas va aparte, en tu maquina / telefono.
 
 name: Build Pokopia IPA
 
@@ -24,8 +28,9 @@ on:
   workflow_dispatch:
     inputs:
       dump_path:
-        description: "Ruta del dump YA presente en el runner (la pones tú, no Cronx)"
-        required: true
+        description: "Ruta del dump YA presente en el runner, si NO usas el secreto DRIVE_DOWNLOAD_URL"
+        required: false
+        default: "dump"
         type: string
       sign_with_xcode:
         description: "Firmar con Xcode y tu equipo pagado (true/false)"
@@ -63,12 +68,42 @@ jobs:
       - name: Check tools (doctor)
         run: python3.12 nxs2.py doctor || true
 
+      - name: Descargar y descomprimir dump desde secreto (si esta puesto)
+        id: resolve
+        env:
+          DRIVE_DOWNLOAD_URL: ${{ secrets.DRIVE_DOWNLOAD_URL }}
+        run: |
+          if [ -z "$DRIVE_DOWNLOAD_URL" ]; then
+            echo "Sin secreto DRIVE_DOWNLOAD_URL: se usara dump_path del input."
+            echo "dump_path=${{ inputs.dump_path }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Descargando dump desde el secreto (el link NO se imprime en el log)..."
+          curl -L --fail -o dump.zip "$DRIVE_DOWNLOAD_URL"
+          mkdir -p dump_unzipped
+          unzip -q dump.zip -d dump_unzipped
+          if [ -d "dump_unzipped/updates" ] || [ -d "dump_unzipped/exefs" ]; then
+            RESOLVED="dump_unzipped"
+          else
+            SUB=$(find dump_unzipped -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            if [ -n "$SUB" ] && { [ -d "$SUB/updates" ] || [ -d "$SUB/exefs" ]; }; then
+              RESOLVED="$SUB"
+            else
+              RESOLVED="dump_unzipped"
+            fi
+          fi
+          echo "Dump descomprimido en: $RESOLVED"
+          ls "$RESOLVED" | head -n 50
+          echo "dump_path=$RESOLVED" >> "$GITHUB_OUTPUT"
+
       - name: Build IPA only (sin app de Mac)
         env:
-          DUMP_PATH: ${{ inputs.dump_path }}
+          DUMP_PATH: ${{ steps.resolve.outputs.dump_path }}
         run: |
           if [ ! -d "$DUMP_PATH" ]; then
-            echo "Dump no encontrado en $DUMP_PATH. Ponlo tú antes de lanzar el workflow."
+            echo "Dump no encontrado en $DUMP_PATH."
+            echo "Si usas Drive, pon el link como secreto DRIVE_DOWNLOAD_URL y vuelve a lanzar."
+            echo "Si no, pon el dump en el runner antes de lanzar y usa dump_path."
             exit 1
           fi
           python3.12 nxs2.py setup
@@ -78,7 +113,7 @@ jobs:
             python3.12 nxs2.py build "$DUMP_PATH" --ipa
           fi
 
-      - name: Upload IPA (bórralo en cuanto lo descargues)
+      - name: Upload IPA (borralo en cuanto lo descargues)
         uses: actions/upload-artifact@v4
         with:
           name: PokemonPokopia-ipa
@@ -87,3 +122,9 @@ jobs:
             **/out/*.app
           retention-days: 1
           if-no-files-found: error
+
+      - name: Borrar dump descargado del runner
+        if: always()
+        run: |
+          rm -rf dump.zip dump_unzipped dump
+          echo "Dump temporal borrado del runner."

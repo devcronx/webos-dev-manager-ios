@@ -45,7 +45,11 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-26
+    # Run 5 (41566750418) fallo al final del empaquetado IPA con Xcode 26.6
+    # (DmGamepad.m: property 'deviceMotionBody' not found): nxnative/pokopia-native
+    # pide Xcode 27 / SDK 27, y la imagen macos-26 solo trae Xcode 26.x.
+    # xcode-27 es la imagen de GitHub con Xcode 27.
+    runs-on: xcode-27
     timeout-minutes: 180
     steps:
       - name: Checkout pokopia-native (solo herramientas, sin contenido del juego)
@@ -64,7 +68,14 @@ jobs:
           brew install xcodegen
           brew install --cask dotnet-sdk
           python3.12 -m pip install "capstone>=5,<6" lz4 fonttools
-          xcodebuild -version || true
+          xcodebuild -version
+          # Fallo rapido si el runner no trae Xcode 27: no vale la pena
+          # compilar shaders 90 minutos para fallar al empaquetar el IPA.
+          XCODE_MAJOR=$(xcodebuild -version | head -n 1 | sed -E 's/.* ([0-9]+)\..*/\1/')
+          if [ "$XCODE_MAJOR" -lt 27 ]; then
+            echo "ERROR: se necesita Xcode 27+, este runner trae Xcode $XCODE_MAJOR."
+            exit 1
+          fi
           python3.12 --version
 
       - name: Check tools (doctor)

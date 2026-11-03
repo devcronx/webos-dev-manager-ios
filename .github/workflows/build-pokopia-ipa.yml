@@ -13,7 +13,9 @@
 # - Borra el artefacto de GitHub en cuanto lo descargues. retention-days: 1 ayuda, no sustituye borrarlo tu.
 #
 # PASOS QUE TU HACES (Cronx NO los corre, NO recibe tu dump y NO firma nada):
-# 1. Sube tu dump COMPRIMIDO en un solo .zip a TU Drive privado, Restringido solo tu.
+# 1. Sube tu dump COMPRIMIDO en un solo .zip a TU Drive, con Anyone with link (Viewer).
+#    El runner no tiene tu sesion de Google, con Restricted no puede bajarlo.
+#    El link solo va como secreto, nunca publicado, y borra el archivo al terminar.
 #    El .zip, al descomprimirlo, debe dejar updates/327680/exefs/ y romfs/,
 #    o exefs/ y romfs/ directamente en la carpeta.
 # 2. En TU repo, pon el link de descarga directa de ese .zip como secreto
@@ -79,7 +81,23 @@ jobs:
             exit 0
           fi
           echo "Descargando dump desde el secreto (el link NO se imprime en el log)..."
-          curl -L --fail -o dump.zip "$DRIVE_DOWNLOAD_URL"
+          python3.12 -m pip install -q gdown
+          # gdown maneja la pagina de confirmacion de Drive para archivos grandes,
+          # y acepta link de vista, link uc, o solo el ID del archivo.
+          if echo "$DRIVE_DOWNLOAD_URL" | grep -q "drive.google.com"; then
+            gdown --fuzzy "$DRIVE_DOWNLOAD_URL" -O dump.zip || curl -L --fail -o dump.zip "$DRIVE_DOWNLOAD_URL"
+          elif echo "$DRIVE_DOWNLOAD_URL" | grep -Eq "^[A-Za-z0-9_-]{20,}$"; then
+            gdown --id "$DRIVE_DOWNLOAD_URL" -O dump.zip
+          else
+            curl -L --fail -o dump.zip "$DRIVE_DOWNLOAD_URL"
+          fi
+          ls -lh dump.zip
+          # Si lo bajado es HTML, no es el zip: es pagina de Drive, no el archivo directo.
+          if head -c 200 dump.zip | grep -qi "<html"; then
+            echo "ERROR: lo bajado NO es un zip, es una pagina HTML de Drive."
+            echo "El secreto debe ser el link del archivo .zip con Anyone with link, no de la carpeta."
+            exit 1
+          fi
           mkdir -p dump_unzipped
           unzip -q dump.zip -d dump_unzipped
           if [ -d "dump_unzipped/updates" ] || [ -d "dump_unzipped/exefs" ]; then

@@ -1,0 +1,89 @@
+# Plantilla para GitHub Actions — Pokopia IPA (solo el build, sin archivos del juego)
+# Pon este archivo en TU repo, en .github/workflows/build-pokopia-ipa.yml
+# Yo (Cronx) NO lo corro, NO recibo tu dump y NO firmo nada. Eso lo haces tú / tu hermano.
+#
+# Requisitos que vienen del README de xFractals/pokopia-native:
+# - Runner macOS con Xcode 27, Python 3.12, .NET 10 y xcodegen
+# - El build de iPhone solo (--ipa), no la app de Mac
+# - Firma para iPhone con equipo PAGADO de Apple Developer (Extended Virtual Addressing).
+#   Sin ese equipo, el IPA con ID gratis instala y se detiene al arrancar.
+# - Borra el artefacto de GitHub en cuanto lo descargues. retention-days: 1 ayuda, no sustituye borrarlo tú.
+#
+# PASOS QUE TÚ HACES (no están automatizados aquí a propósito):
+# 1. En TU repo, sube/provee tu propio dump por tu vía, sin pasármelo a mí.
+#    El workflow espera que el dump ya esté en el runner en la ruta $DUMP_PATH.
+#    NO incluyas el dump en el repo público, y NO lo subas a este chat.
+# 2. Pon tu Team ID como secreto en TU repo (nombre: APPLE_TEAM_ID) si vas a firmar con Xcode.
+#    No escribas el Team ID en este archivo.
+# 3. Lanza el workflow a mano (workflow_dispatch), descarga el IPA, y bórralo de GitHub de una vez.
+# 4. El refresh de shaders después de jugar zonas nuevas va aparte, en tu máquina / teléfono.
+
+name: Build Pokopia IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      dump_path:
+        description: "Ruta del dump YA presente en el runner (la pones tú, no Cronx)"
+        required: true
+        type: string
+      sign_with_xcode:
+        description: "Firmar con Xcode y tu equipo pagado (true/false)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Checkout pokopia-native (solo herramientas, sin contenido del juego)
+        uses: actions/checkout@v4
+        with:
+          repository: xFractals/pokopia-native
+          ref: main
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools (XcodeGen, .NET, Python deps del README)
+        run: |
+          brew install xcodegen
+          brew install --cask dotnet-sdk
+          python3.12 -m pip install "capstone>=5,<6" lz4 fonttools
+          xcodebuild -version || true
+          python3.12 --version
+
+      - name: Check tools (doctor)
+        run: python3.12 nxs2.py doctor || true
+
+      - name: Build IPA only (sin app de Mac)
+        env:
+          DUMP_PATH: ${{ inputs.dump_path }}
+        run: |
+          if [ ! -d "$DUMP_PATH" ]; then
+            echo "Dump no encontrado en $DUMP_PATH. Ponlo tú antes de lanzar el workflow."
+            exit 1
+          fi
+          python3.12 nxs2.py setup
+          if [ "${{ inputs.sign_with_xcode }}" = "true" ]; then
+            python3.12 nxs2.py build "$DUMP_PATH" --ipa --xcode --team-id "${{ secrets.APPLE_TEAM_ID }}"
+          else
+            python3.12 nxs2.py build "$DUMP_PATH" --ipa
+          fi
+
+      - name: Upload IPA (bórralo en cuanto lo descargues)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PokemonPokopia-ipa
+          path: |
+            **/out/*.ipa
+            **/out/*.app
+          retention-days: 1
+          if-no-files-found: error
